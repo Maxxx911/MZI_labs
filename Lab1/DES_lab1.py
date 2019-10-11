@@ -125,8 +125,146 @@ class DES:
   ]
 
   def __init__(self, key):
+    self.check_key_size(key)
     self.converter = Converter()
     self.file_loader = FileLoader()
+    self.key = key # 1 x 56 бит
+    self.sub_keys = [] # 16 x 48 бит
+
+  def get_value_from_block(self, block, x):
+    return block[x]
+
+  def permutation(self, block, table):
+    result = []
+    for x in table:
+      result.append(self.get_value_from_block(block, x))
+    return result
+
+  def left_shift(self, data, n):
+    return data[n:] + data[:n]
+
+  def supplement_data(self, data):
+    length = len(data)
+    if length % 8 != 0:
+      data += '0' * (8 - length % 8)
+    return data
+
+  def generate_sub_keys(self):
+    bits_key = self.converter.to_bin(self.key)
+    key = self.permutation(bits_key, self.key_permutation_table_1)
+    C_0 = key[:28]
+    D_0 = key[28:]
+
+    for shift_count in self.left_rotation_table:
+      C_0 = self.left_shift(C_0, shift_count)
+      D_0 = self.left_shift(D_0, shift_count)
+      new_key = self.permutation(C_0 + D_0, self.key_permutation_table_2)
+      self.sub_keys.append(new_key)
+
+
+  def xor(self, arr1, arr2):
+    bit_s = []
+    for index, item in enumerate(arr1):
+      bit_s.append(arr1[index] ^ arr2[index])
+    return bit_s
+
+
+  def get_blocks(self, data):
+    blocks = []
+    for i in range(0, len(data), 8):
+      blocks.append(data[i: i + 8])
+    return blocks
+
+
+  def trans(self, R):
+    B = []
+    for i in range(0, len(R), 6):
+      B.append(R[i:i + 6])  # b1, b2...b8 векторы по 6 бит
+    C = []
+    for i in range(8):
+      Bi = B[i]
+      Si = self.SBOX[i]
+      m = int(str(Bi[0]) + str(Bi[5]), 2)  # номер строки
+      l = int(''.join(map(str, Bi[1:5])), 2)  # номер столбца
+      Bi = Si[m][l]
+      Bi = self.converter.int_to_bits(Bi, 4)
+      C.extend(Bi)
+    return C
+
+
+  def feistel(self, R, key):
+    R = self.permutation(R, self.expansion_table)
+    R = self.xor(R, key)
+    C = self.trans(R)
+    return self.permutation(C, self.permutation_table)
+
+  def crypt(self, blocks, crypt_type=ENCRYPT):
+    crypted_data = []
+    for block in blocks:
+      block = self.converter.to_bin(block)
+      block = self.permutation(block, self.initial_permutation_table)
+      L = block[:32]
+      R = block[32:]
+      if crypt_type == self.ENCRYPT:
+        i = 0
+        j = 1
+      else:
+        i = 15
+        j = -1
+
+      for o in range(16):
+        next_L = R[:]
+        feistel = self.feistel(R, self.sub_keys[i])
+        next_R = self.xor(L, feistel)
+        L = next_L
+        R = next_R
+        i += j
+
+      block = self.permutation(R + L, self.final_permutation_table)
+      str_block = self.converter.to_string(block)
+      crypted_data.append(str_block)
+    return ''.join(crypted_data)
+
+  def encrypt(self, data):
+    if not data:
+      raise ValueError("Wrong data for encrypting")
+    self.generate_sub_keys()
+    data = self.supplement_data(data)
+    blocks = self.get_blocks(data)
+    return self.crypt(blocks)
+
+  def decrypt(self, data):
+    blocks = self.get_blocks(data)
+    result = self.crypt(blocks, crypt_type=self.DECRYPT)
+    return result[:-8] + result[-8:].rstrip('0')
+
+
+  def check_key_size(self, key):
+    if len(key) != 8:
+      raise ValueError("Invalid DES key size.")
+
+class DES3:
+  def __init__(self, key1, key2, key3):
+    self.check_key_size(key1)
+    self.check_key_size(key2)
+    self.check_key_size(key3)
+    self.crypter1 = DES(key1)
+    self.crypter2 = DES(key2)
+    self.crypter3 = DES(key3)
+
+  def encrypt(self, data):
+    data = self.crypter1.encrypt(data)
+    data = self.crypter2.encrypt(data)
+    return self.crypter3.encrypt(data)
+
+  def decrypt(self, data):
+    data = self.crypter3.decrypt(data)
+    data = self.crypter2.decrypt(data)
+    return self.crypter1.decrypt(data)
+  
+  def check_key_size(self, key):
+    if len(key) != 8:
+      raise ValueError("Invalid DES key size.")
 
 def main():
   file_loader = FileLoader()
@@ -137,6 +275,17 @@ def main():
   key2 = "12345678"
   key3 = "qwerty43"
   decrypted_file_name = "decrypted.txt"
+
+
+  print(" DES 3 ")
+  des3 = DES3(key1=key1, key2=key2, key3=key3)
+  encrypted = des3.encrypt(data)
+  file_loader.save(encrypted)
+  print("Encrypted ", encrypted)
+
+  decrypted = des3.decrypt(encrypted)
+  file_loader.save(decrypted, decrypted_file_name)
+  print("Decrypted ", decrypted)
 
 
 if __name__ == '__main__':
