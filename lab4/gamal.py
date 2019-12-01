@@ -1,6 +1,6 @@
 from random import randint
 
-def text_from_int(n, encoding='ASCII', errors='surrogatepass'):
+def text_from_int(n):
 	return n.to_bytes(
 	    (n.bit_length() + 7) // 8, 'big').decode( errors='ignore') or '\0'
 
